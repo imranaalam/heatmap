@@ -8,7 +8,11 @@ import pytz
 from datetime import datetime, timedelta, time as dt_time
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import time
+from streamlit_autorefresh import st_autorefresh  # Import st_autorefresh for auto-refresh
+
+# -----------------------------
+# Streamlit App Configuration
+# -----------------------------
 
 # Set Streamlit page configuration for better layout
 st.set_page_config(layout="wide", page_title="Stock Heatmap Dashboard")
@@ -17,7 +21,7 @@ st.set_page_config(layout="wide", page_title="Stock Heatmap Dashboard")
 # Configuration Variables
 # -----------------------------
 
-DATABASE_PATH = 'stock_data.db'
+DATABASE_PATH = 'stock_data.db'  # Ensure this path is correct and accessible
 LOCAL_TIMEZONE = 'Asia/Karachi'
 
 # Define the available time intervals in minutes
@@ -71,6 +75,7 @@ cmaps = [
 # -----------------------------
 # Functions
 # -----------------------------
+@st.cache_data(ttl=60)  # Cache data for 60 seconds to improve performance
 def get_data_from_db(database_path):
     """Load data from the SQLite database."""
     if not os.path.isfile(database_path):
@@ -165,11 +170,177 @@ def calculate_ema(group, span):
     return ema
 
 # -----------------------------
+# Sidebar Controls - Section 1: Analysis & Calculation Options
+# -----------------------------
+st.sidebar.title("Analysis & Calculation Options")
+
+# Calculation Method Selection
+calculation_method = st.sidebar.selectbox(
+    "Data Analysis & Calculation Method",
+    options=[
+        "Last Percentage Change (Default)",
+        "Speed of Change",
+        "Volume-Weighted Percentage Change",
+        "Exponential Moving Average (EMA)"
+    ],
+    index=0,
+    help="Choose how to calculate the percentage change for intraday momentum analysis."
+)
+
+# Time Interval for Calculation
+time_interval_label = st.sidebar.selectbox(
+    "Time Interval for Calculation",
+    options=list(INTERVAL_OPTIONS.keys()),
+    index=0,  # Default to "1 minute"
+    help="Select the time interval over which to calculate the selected metric."
+)
+time_interval_minutes = INTERVAL_OPTIONS[time_interval_label]
+
+# -----------------------------
+# Sidebar Controls - Section 2: Controls
+# -----------------------------
+st.sidebar.markdown("---")
+st.sidebar.title("Controls")
+
+# **1. Sorting Option**
+sort_option = st.sidebar.radio(
+    "Sort Results By:",
+    options=["Percentage Change (Default)", "Alphabetically"],
+    index=0,
+    help="Choose to sort symbols by their latest percentage change or alphabetically."
+)
+
+# **2. Date Selector**
+# Load data first to determine min and max dates
+df_initial = get_data_from_db(DATABASE_PATH)
+
+if df_initial is not None and not df_initial.empty:
+    df_initial = convert_timestamp(df_initial, LOCAL_TIMEZONE)
+    # Ensure numeric columns are properly typed
+    df_initial['change_percent'] = pd.to_numeric(df_initial['change_percent'], errors='coerce')
+    df_initial['close'] = pd.to_numeric(df_initial['close'], errors='coerce')
+    df_initial['volume'] = pd.to_numeric(df_initial['volume'], errors='coerce')
+    # Drop rows with NaN in essential columns
+    df_initial.dropna(subset=['change_percent', 'close', 'volume'], inplace=True)
+    
+    # Use the already processed 'df_initial' to get min and max dates
+    if not df_initial.empty:
+        min_date = df_initial['datetime'].dt.date.min()
+        max_date = df_initial['datetime'].dt.date.max()
+    else:
+        min_date = datetime.now().date()
+        max_date = datetime.now().date()
+    
+    selected_date = st.sidebar.date_input(
+        "Select Date",
+        value=datetime.now(pytz.timezone(LOCAL_TIMEZONE)).date(),
+        min_value=min_date,
+        max_value=max_date,
+        help="Select the date for which you want to analyze the stock data."
+    )
+else:
+    selected_date = st.sidebar.date_input(
+        "Select Date",
+        value=datetime.now(pytz.timezone(LOCAL_TIMEZONE)).date(),
+        help="Select the date for which you want to analyze the stock data."
+    )
+
+# **3. Time Range Selectors**
+start_time_default = dt_time(9, 0)  # Default start time at 9:00 AM
+end_time_default = dt_time(16, 0)   # Default end time at 4:00 PM
+
+selected_start_time = st.sidebar.time_input(
+    "Start Time",
+    value=start_time_default,
+    help="Select the start time for filtering the stock data."
+)
+
+selected_end_time = st.sidebar.time_input(
+    "End Time",
+    value=end_time_default,
+    help="Select the end time for filtering the stock data."
+)
+
+# Validate that start time is before end time
+if selected_start_time >= selected_end_time:
+    st.sidebar.error("Start time must be earlier than end time.")
+
+# **4. Display Options: Number of Symbols to Display**
+num_symbols = st.sidebar.slider(
+    "Select number of top symbols to display",
+    min_value=10,
+    max_value=300,
+    value=DEFAULT_NUM_SYMBOLS,
+    step=10,
+    help="Choose how many top symbols to display based on the selected sorting method."
+)
+
+# **5. Refresh & Sync Interval Selection**
+st.sidebar.markdown("### Refresh Interval")
+REFRESH_OPTIONS = {
+    "10 seconds": 10000,
+    "30 seconds": 30000,
+    "45 seconds": 45000,
+    "1 minute": 60000,
+    "2 minutes": 120000,
+    "3 minutes": 180000,
+    "5 minutes": 300000,
+    "10 minutes": 600000
+}
+
+selected_refresh_label = st.sidebar.selectbox(
+    "Select Sync Interval",
+    options=list(REFRESH_OPTIONS.keys()),
+    index=3,  # Default to '1 minute'
+    help="Choose how frequently the data and heatmap refresh."
+)
+
+refresh_interval = REFRESH_OPTIONS[selected_refresh_label]
+
+# **6. Visualization Options: Color Theme**
+st.sidebar.markdown("### Visualization Options")
+
+# Define available color themes for heatmap visualization
+color_map_options = []
+for category, maps in cmaps:
+    for cmap in maps:
+        display_name = f"{category} - {cmap}"
+        color_map_options.append(display_name)
+
+# Add a custom color scale at the top of the list
+color_map_options.insert(0, 'Custom - blue2green20')
+
+selected_cmap_display = st.sidebar.selectbox(
+    "Select Color Theme",
+    options=color_map_options,
+    index=0,  # Default to 'Custom - blue2green20'
+    help="Choose a color theme for the heatmap."
+)
+
+# Determine the actual colormap to use
+if selected_cmap_display == 'Custom - blue2green20':
+    selected_cmap = 'blue2green20'
+else:
+    selected_cmap = selected_cmap_display.split(' - ')[-1]
+
+# -----------------------------
+# Auto Refresh Configuration
+# -----------------------------
+
+# Use st_autorefresh for automatic refresh with the user-selected interval
+refresh_count = st_autorefresh(
+    interval=refresh_interval,  # Use the interval from the sidebar (in milliseconds)
+    limit=None,                 # Set to None for infinite refreshes
+    key="data_refresh"          # Unique key for this component
+)
+
+# -----------------------------
 # Load and Process Data
 # -----------------------------
+
 df = get_data_from_db(DATABASE_PATH)
 
-if df is not None:
+if df is not None and not df.empty:
     df = convert_timestamp(df, LOCAL_TIMEZONE)
     # Ensure numeric columns are properly typed
     df['change_percent'] = pd.to_numeric(df['change_percent'], errors='coerce')
@@ -178,138 +349,14 @@ if df is not None:
     # Drop rows with NaN in essential columns
     df.dropna(subset=['change_percent', 'close', 'volume'], inplace=True)
 
-    # -----------------------------
-    # Sidebar Controls - Section 1: Analysis & Calculation Options
-    # -----------------------------
-    st.sidebar.title("Analysis & Calculation Options")
-
-    # Calculation Method Selection
-    calculation_method = st.sidebar.selectbox(
-        "Data Analysis & Calculation Method",
-        options=[
-            "Last Percentage Change (Default)",
-            "Speed of Change",
-            "Volume-Weighted Percentage Change",
-            "Exponential Moving Average (EMA)"
-        ],
-        index=0,
-        help="Choose how to calculate the percentage change for intraday momentum analysis."
-    )
-
-    # Time Interval for Calculation
-    time_interval_label = st.sidebar.selectbox(
-        "Time Interval for Calculation",
-        options=list(INTERVAL_OPTIONS.keys()),
-        index=0,  # Default to "1 minute"
-        help="Select the time interval over which to calculate the selected metric."
-    )
-    time_interval_minutes = INTERVAL_OPTIONS[time_interval_label]
-
-    # -----------------------------
-    # Sidebar Controls - Section 2: Controls
-    # -----------------------------
-    st.sidebar.markdown("---")
-    st.sidebar.title("Controls")
-
-    # **1. Sorting Option**
-    sort_option = st.sidebar.radio(
-        "Sort Results By:",
-        options=["Percentage Change (Default)", "Alphabetically"],
-        index=0,
-        help="Choose to sort symbols by their latest percentage change or alphabetically."
-    )
-
-    # **2. Date Selector**
-    selected_date = st.sidebar.date_input(
-        "Select Date",
-        value=datetime.now(pytz.timezone(LOCAL_TIMEZONE)).date(),
-        min_value=df['datetime'].dt.date.min(),
-        max_value=df['datetime'].dt.date.max(),
-        help="Select the date for which you want to analyze the stock data."
-    )
-
-    # **3. Time Range Selectors**
-    start_time_default = dt_time(9, 0)  # Default start time at 9:00 AM
-    end_time_default = dt_time(16, 0)   # Default end time at 4:00 PM
-
-    selected_start_time = st.sidebar.time_input(
-        "Start Time",
-        value=start_time_default,
-        help="Select the start time for filtering the stock data."
-    )
-
-    selected_end_time = st.sidebar.time_input(
-        "End Time",
-        value=end_time_default,
-        help="Select the end time for filtering the stock data."
-    )
-
-    # Validate that start time is before end time
-    if selected_start_time >= selected_end_time:
-        st.error("Start time must be earlier than end time.")
+    # Debugging: Check if 'datetime' column exists
+    if 'datetime' not in df.columns:
+        st.error("The 'datetime' column is missing after processing. Please check your data.")
         st.stop()
 
-    # **4. Display Options: Number of Symbols to Display**
-    num_symbols = st.sidebar.slider(
-        "Select number of top symbols to display",
-        min_value=10,
-        max_value=300,
-        value=DEFAULT_NUM_SYMBOLS,
-        step=10,
-        help="Choose how many top symbols to display based on the selected sorting method."
-    )
-
-    # **5. Refresh & Sync Interval Selection**
-    st.sidebar.markdown("### Refresh Interval")
-    REFRESH_OPTIONS = {
-        "10 seconds": 10,
-        "30 seconds": 30,
-        "45 seconds": 45,
-        "1 minute": 60,
-        "2 minutes": 120,
-        "3 minutes": 180,
-        "5 minutes": 300,
-        "10 minutes": 600
-    }
-
-    selected_refresh_label = st.sidebar.selectbox(
-        "Select Sync Interval",
-        options=list(REFRESH_OPTIONS.keys()),
-        index=3,  # Default to '1 minute'
-        help="Choose how frequently the data and heatmap refresh."
-    )
-    refresh_interval = REFRESH_OPTIONS[selected_refresh_label]
-
-    # **6. Visualization Options: Color Theme** (Moved into Controls Section)
-    st.sidebar.markdown("### Visualization Options")
-
-    # Define available color themes for heatmap visualization
-    color_map_options = []
-    for category, maps in cmaps:
-        for cmap in maps:
-            display_name = f"{category} - {cmap}"
-            color_map_options.append(display_name)
-
-    # Add a custom color scale at the top of the list
-    color_map_options.insert(0, 'Custom - blue2green20')
-
-    selected_cmap_display = st.sidebar.selectbox(
-        "Select Color Theme",
-        options=color_map_options,
-        index=0,  # Default to 'Custom - blue2green20'
-        help="Choose a color theme for the heatmap."
-    )
-
-    # Determine the actual colormap to use
-    if selected_cmap_display == 'Custom - blue2green20':
-        selected_cmap = 'blue2green20'
-    else:
-        selected_cmap = selected_cmap_display.split(' - ')[-1]
-
     # -----------------------------
-    # Determine Start and End Times
+    # Filter Data Based on Date and Time Range
     # -----------------------------
-    # Combine selected date with start and end times
     try:
         start_datetime = datetime.combine(selected_date, selected_start_time)
         end_datetime = datetime.combine(selected_date, selected_end_time)
@@ -325,9 +372,6 @@ if df is not None:
         st.error("Start time must be before end time.")
         st.stop()
 
-    # -----------------------------
-    # Filter Data Based on Date and Time Range
-    # -----------------------------
     selected_df = df[(df['datetime'] >= start_datetime) & (df['datetime'] <= end_datetime)]
     selected_df = selected_df.sort_values('datetime')
 
@@ -478,7 +522,7 @@ if df is not None:
     # Display the additional details below the main title
     st.markdown(f"<div style='text-align: center;'><sup>{additional_details}</sup></div>", unsafe_allow_html=True)
 
-    # Determine if the selected_cmap is Plotly built-in or needs a custom colorscale
+    # Define Plotly's built-in colorscales
     plotly_colorscales = [
         'aggrnyl', 'agsunset', 'algae', 'amp', 'armyrose', 'balance', 'blackbody', 'bluered', 'blues', 'blugrn',
         'bluyl', 'brbg', 'brwnyl', 'bugn', 'bupu', 'burg', 'burgyl', 'cividis', 'curl', 'darkmint',
@@ -511,7 +555,7 @@ if df is not None:
         zmax=10,               # Set maximum value of the color scale
         colorbar=dict(
             title=dict(
-                text="Metric Label",
+                text=metric_label,
                 side="top"  # Position the title above the color bar
             ),
             orientation='h',
@@ -547,9 +591,6 @@ if df is not None:
         margin=dict(l=0, r=0, t=50, b=20)  # Minimize margins for maximum heatmap area
     )
 
-
-
-
     st.plotly_chart(fig, use_container_width=True)
 
     # -----------------------------
@@ -558,9 +599,6 @@ if df is not None:
     st.markdown("### Selected Metric:")
     st.write(f"{metric_label} displayed in the heatmap.")
 
-    # -----------------------------
-    # Refresh the App Based on the Selected Interval
-    # -----------------------------
-    time.sleep(refresh_interval)
-    st.rerun()
+else:
+    st.warning("No data available in the database.")
 
