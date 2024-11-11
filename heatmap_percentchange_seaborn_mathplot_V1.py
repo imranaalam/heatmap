@@ -17,7 +17,7 @@ st.set_page_config(layout="wide", page_title="Stock Heatmap Dashboard")
 # Configuration Variables
 # -----------------------------
 
-DATABASE_PATH = 'D:\\$REPOs\\stock exchange psx\\stock_data.db'
+DATABASE_PATH = 'stock_data.db'
 LOCAL_TIMEZONE = 'Asia/Karachi'
 
 # Define the available time intervals in minutes
