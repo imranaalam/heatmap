@@ -1,3 +1,3 @@
 |-- heatmap_percentchange_seaborn_mathplot_V1.py
-|-- requirements.txt.txt
+|-- requirements.txt
 |-- stock_data.db
