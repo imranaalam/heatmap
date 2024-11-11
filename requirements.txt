@@ -4,3 +4,4 @@ numpy
 plotly
 matplotlib
 pytz
+streamlit_autorefresh
