@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import os
 import pytz
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, time as dt_time
 from streamlit_autorefresh import st_autorefresh  # Import st_autorefresh for auto-refresh
 
 # -----------------------------
@@ -42,6 +42,29 @@ INTERVAL_OPTIONS = {
 }
 
 DEFAULT_NUM_SYMBOLS = 120  # Default set to 120
+
+# -----------------------------
+# Calculation Settings
+# -----------------------------
+
+CALCULATION_SETTINGS = {
+    "Last Percentage Change (Default)": {
+        "zmin": -10,
+        "zmax": 10
+    },
+    "Speed of Change": {
+        "zmin": -2,
+        "zmax": 2
+    },
+    "Volume-Weighted Percentage Change": {
+        "zmin": -10,
+        "zmax": 10
+    },
+    "Exponential Moving Average (EMA)": {
+        "zmin": -10,
+        "zmax": 10
+    }
+}
 
 # -----------------------------
 # Functions
@@ -107,12 +130,7 @@ st.sidebar.title("Analysis & Calculation Options")
 # Calculation Method Selection
 calculation_method = st.sidebar.selectbox(
     "Data Analysis & Calculation Method",
-    options=[
-        "Last Percentage Change (Default)",
-        "Speed of Change",
-        "Volume-Weighted Percentage Change",
-        "Exponential Moving Average (EMA)"
-    ],
+    options=list(CALCULATION_SETTINGS.keys()),
     index=0,
     help="Choose how to calculate the percentage change for intraday momentum analysis."
 )
@@ -127,7 +145,44 @@ time_interval_label = st.sidebar.selectbox(
 time_interval_minutes = INTERVAL_OPTIONS[time_interval_label]
 
 # -----------------------------
-# Sidebar Controls - Section 2: Controls
+# Sidebar Controls - Section 2: Scale Configuration
+# -----------------------------
+st.sidebar.markdown("---")
+st.sidebar.title("Scale Configuration")
+
+# Retrieve current calculation method's scale settings
+current_settings = CALCULATION_SETTINGS.get(calculation_method, {"zmin": -10, "zmax": 10})
+default_zmin = current_settings["zmin"]
+default_zmax = current_settings["zmax"]
+
+# Allow user to input custom zmin and zmax
+custom_scale = st.sidebar.checkbox("Customize Scale", value=False, help="Enable to customize zmin and zmax.")
+if custom_scale:
+    user_zmin = st.sidebar.number_input(
+        "Minimum Percentage Change (zmin)",
+        value=float(default_zmin),  # Cast to float
+        step=0.1,
+        format="%.2f",
+        help=f"Set the minimum value for the color scale. Default is {default_zmin}%%."
+    )
+    user_zmax = st.sidebar.number_input(
+        "Maximum Percentage Change (zmax)",
+        value=float(default_zmax),  # Cast to float
+        step=0.1,
+        format="%.2f",
+        help=f"Set the maximum value for the color scale. Default is {default_zmax}%%."
+    )
+    # Ensure zmin is less than zmax
+    if user_zmin >= user_zmax:
+        st.sidebar.error("zmin must be less than zmax.")
+        st.stop()
+    zmin, zmax = user_zmin, user_zmax
+else:
+    zmin, zmax = default_zmin, default_zmax
+
+
+# -----------------------------
+# Sidebar Controls - Section 3: Controls
 # -----------------------------
 st.sidebar.markdown("---")
 st.sidebar.title("Controls")
@@ -195,6 +250,7 @@ selected_end_time = st.sidebar.time_input(
 # Validate that start time is before end time
 if selected_start_time >= selected_end_time:
     st.sidebar.error("Start time must be earlier than end time.")
+    st.stop()
 
 # **4. Display Options: Number of Symbols to Display**
 num_symbols = st.sidebar.slider(
@@ -228,12 +284,6 @@ selected_refresh_label = st.sidebar.selectbox(
 
 refresh_interval = REFRESH_OPTIONS[selected_refresh_label]
 
-# **6. Visualization Options: Color Theme**
-st.sidebar.markdown("---")
-st.sidebar.title("Visualization Options")
-
-# Since we're using only the custom 11-color scale, no need for color theme selection
-st.sidebar.info("Only the custom 11-color scale is available for the heatmap.")
 
 # -----------------------------
 # Auto Refresh Configuration
@@ -410,7 +460,7 @@ if df is not None and not df.empty:
     heatmap_data = pivot_df.values
     time_labels = [dt.strftime("%H:%M") for dt in pivot_df.columns]
 
-    # Create hover text
+    # Create hover text with higher decimal precision
     hover_text = []
     for i, symbol in enumerate(pivot_df.index):
         row = []
@@ -457,9 +507,19 @@ if df is not None and not df.empty:
         [1.0, '#006400']    # Dark Green
     ]
 
-    # Generate the colorscale list for Plotly
-    colorscale = custom_colorscale
+    # Define a function to generate tick values and labels based on zmin and zmax
+    def generate_ticks(zmin, zmax, num_bins=10):
+        """Generate tick values and labels for the color bar."""
+        # Generate bin edges (including both endpoints)
+        bins = np.linspace(zmin, zmax, num_bins + 1)
+        tickvals = bins
+        ticktext = [f"{x:.2f}%" for x in bins]
+        return tickvals, ticktext
 
+    # Generate ticks
+    tickvals, ticktext = generate_ticks(zmin, zmax, num_bins=10)
+
+    # Update the Plotly Heatmap section with the corrected color bar configuration
     fig = go.Figure()
 
     # Add the Heatmap trace with discrete color bands
@@ -467,22 +527,22 @@ if df is not None and not df.empty:
         z=heatmap_data,
         x=time_labels,
         y=symbols_with_change,
-        colorscale=colorscale,
-        zmin=-10,
-        zmax=10,
+        colorscale=custom_colorscale,
+        zmin=zmin,
+        zmax=zmax,
         colorbar=dict(
             title=dict(
                 text="Percentage Change",
-                side="top"  # Position the title above the color bar
+                side="top"
             ),
             tickmode="array",
-            tickvals=[-10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10],
-            ticktext=["-10%", "-8%", "-6%", "-4%", "-2%", "0%", "2%", "4%", "6%", "8%", "10%"],
+            tickvals=tickvals,
+            ticktext=ticktext,
             ticks="outside",
             orientation='h',
             x=0.5,               # Center the colorbar horizontally
             xanchor='center',
-            y=-0.04,             # Slightly below the heatmap
+            y=-0.09,             # Slightly below the heatmap
             yanchor='top',
             lenmode='fraction',
             len=0.8,             # Adjust the width of the color bar
@@ -493,7 +553,6 @@ if df is not None and not df.empty:
         text=hover_text,
         showscale=True
     ))
-
     # Update layout to adjust the y-axis space and show solid bands
     fig.update_layout(
         autosize=True,
