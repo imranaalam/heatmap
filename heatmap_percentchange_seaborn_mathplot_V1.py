@@ -214,36 +214,38 @@ sort_option = st.sidebar.radio(
 # Load data first to determine min and max dates
 df_initial = get_data_from_db(DATABASE_PATH)
 
+# Check if there is any data available in the database
 if df_initial is not None and not df_initial.empty:
     df_initial = convert_timestamp(df_initial, LOCAL_TIMEZONE)
-    # Ensure numeric columns are properly typed
     df_initial['change_percent'] = pd.to_numeric(df_initial['change_percent'], errors='coerce')
     df_initial['close'] = pd.to_numeric(df_initial['close'], errors='coerce')
     df_initial['volume'] = pd.to_numeric(df_initial['volume'], errors='coerce')
-    # Drop rows with NaN in essential columns
     df_initial.dropna(subset=['change_percent', 'close', 'volume'], inplace=True)
-    
-    # Use the already processed 'df_initial' to get min and max dates
+
     if not df_initial.empty:
         min_date = df_initial['datetime'].dt.date.min()
         max_date = df_initial['datetime'].dt.date.max()
+
+        # Set the default date to the latest available date in the dataset
+        default_date = max_date
     else:
         min_date = datetime.now().date()
         max_date = datetime.now().date()
-    
-    selected_date = st.sidebar.date_input(
-        "Select Date",
-        value=datetime.now(pytz.timezone(LOCAL_TIMEZONE)).date(),
-        min_value=min_date,
-        max_value=max_date,
-        help="Select the date for which you want to analyze the stock data."
-    )
+        default_date = max_date
 else:
-    selected_date = st.sidebar.date_input(
-        "Select Date",
-        value=datetime.now(pytz.timezone(LOCAL_TIMEZONE)).date(),
-        help="Select the date for which you want to analyze the stock data."
-    )
+    min_date = datetime.now().date()
+    max_date = datetime.now().date()
+    default_date = max_date
+
+# Use the latest available date as the default
+selected_date = st.sidebar.date_input(
+    "Select Date",
+    value=default_date,
+    min_value=min_date,
+    max_value=max_date,
+    help="Select the date for which you want to analyze the stock data."
+)
+
 
 # **3. Time Range Selectors**
 start_time_default = dt_time(9, 0)  # Default start time at 9:00 AM
