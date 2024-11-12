@@ -1,3 +1,9 @@
 |-- heatmap_percentchange_seaborn_mathplot_V1.py
+|-- heatmap_percentchange_seaborn_mathplot_V3.py
+|-- psx_data_Stream_sqlite_v1.py
+|-- psx_stream_save_Read_duckdb_v2.py
+|-- psx_stream_save_Read_duckdb_v3.py
 |-- requirements.txt
+|-- stock_data - Copy - Copy.duckdb
 |-- stock_data.db
+|-- stock_data.duckdb
